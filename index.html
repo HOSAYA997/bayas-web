@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Precio de las bayas</title>
+<style>
+  :root { color-scheme: dark; --bg:#12141a; --card:#1b1f29; --line:#2a2f3c; --mut:#9aa0b0; --ok:#6fd68a; --bad:#f07a7a; --warn:#f0b45a; --acc:#6aa8ff; }
+  * { box-sizing:border-box; }
+  body { font-family:system-ui,sans-serif; background:var(--bg); color:#e8e8ee; margin:0; padding:18px; }
+  h1 { margin:0 0 4px; font-size:1.4rem; }
+  #estado { font-size:.9rem; color:var(--mut); margin-bottom:12px; }
+  #estado.ok{color:var(--ok)} #estado.warn{color:var(--warn)} #estado.err{color:var(--bad)}
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+  input, select, button, summary { background:var(--card); color:inherit; border:1px solid var(--line); border-radius:8px; padding:7px 10px; font:inherit; }
+  input[type=number] { width:90px; } input[type=search] { min-width:170px; }
+  button, summary { cursor:pointer; } button:hover, summary:hover { border-color:var(--acc); }
+  button.on { border-color:#e5b94a; color:#e5b94a; background:#2a2415; }
+  #count { color:var(--mut); font-size:.85rem; margin:4px 0 10px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; text-align:center; cursor:pointer; transition:border-color .15s, transform .15s; }
+  .card:hover { border-color:var(--acc); transform:translateY(-2px); }
+  .card.alta { border-color:#2f6b43; background:#18281e; }
+  .ico { width:48px; height:48px; image-rendering:pixelated; display:block; margin:0 auto 6px; }
+  .ico.vacio { background:#262b38; border-radius:8px; }
+  .nombre { font-size:.9rem; min-height:2.2em; }
+  .precio { font-size:1.35rem; font-weight:700; font-variant-numeric:tabular-nums; }
+  .cambio { font-size:.85rem; font-variant-numeric:tabular-nums; } .sube{color:var(--ok)} .baja{color:var(--bad)}
+  @keyframes flash-up   { 0% { background:#1f7a3a; box-shadow:0 0 18px #3fe07a; border-color:#3fe07a; }
+                          100% { box-shadow:0 0 0 transparent; } }
+  @keyframes flash-down { 0% { background:#8a2424; box-shadow:0 0 18px #ff5a5a; border-color:#ff5a5a; }
+                          100% { box-shadow:0 0 0 transparent; } }
+  .card.f-up   { animation:flash-up 2s ease-out both; }
+  .card.f-down { animation:flash-down 2s ease-out both; }
+  details.mgr { position:relative; }
+  details.mgr summary { list-style:none; } details.mgr summary::-webkit-details-marker { display:none; }
+  .mgrpanel { position:absolute; top:calc(100% + 6px); left:0; z-index:4; width:min(560px,92vw); max-height:65vh; overflow:auto;
+              background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; box-shadow:0 10px 30px #000a; }
+  .mgrtop { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; position:sticky; top:-12px; background:var(--card); padding:8px 0; z-index:1; }
+  .grp { margin:10px 0 4px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .grp small { color:var(--mut); font-weight:400; }
+  .grp button { padding:2px 8px; font-size:.8rem; }
+  .lst { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:2px 10px; }
+  .lst label { display:flex; gap:6px; align-items:center; font-size:.88rem; padding:2px 0; cursor:pointer; }
+  #modal { position:fixed; inset:0; background:#000a; display:none; align-items:center; justify-content:center; padding:14px; z-index:5; }
+  #modal.on { display:flex; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; width:min(820px,100%); padding:16px; max-height:95vh; overflow:auto; }
+  .ph { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
+  .ph .ico { margin:0; width:40px; height:40px; } .ph h2 { margin:0; flex:1; font-size:1.2rem; }
+  .rangos { display:flex; gap:6px; margin-bottom:8px; } .rangos button.on { border-color:var(--acc); color:var(--acc); background:var(--card); }
+  .chartbox { height:320px; position:relative; }
+  #stats { display:flex; gap:18px; flex-wrap:wrap; color:var(--mut); font-size:.85rem; margin-top:8px; }
+  #hmsg { color:var(--mut); font-size:.9rem; padding:8px 0; }
+</style>
+</head>
+<body>
+<h1>Precio de las bayas</h1>
+<div id="estado">Conectando…</div>
+
+<div class="bar">
+  <button id="f-watch" title="Mostrar solo las que tengo monitorizadas">★ Monitorizadas</button>
+  <details class="mgr" id="mgr">
+    <summary id="mgr-sum">Gestionar monitorizadas</summary>
+    <div class="mgrpanel">
+      <div class="mgrtop">
+        <input id="m-search" type="search" placeholder="Buscar en la lista…">
+        <button id="m-reset" title="Volver a la lista inicial">Restaurar inicial</button>
+        <button id="m-all">Marcar visibles</button>
+        <button id="m-none">Quitar visibles</button>
+      </div>
+      <div id="m-list"></div>
+    </div>
+  </details>
+  <input id="f-text" type="search" placeholder="Buscar baya…">
+  <select id="f-dir">
+    <option value="all">Subidas y bajadas</option>
+    <option value="up">Solo suben</option>
+    <option value="down">Solo bajan</option>
+  </select>
+  <input id="f-min" type="number" step="0.1" placeholder="Precio mín">
+  <input id="f-max" type="number" step="0.1" placeholder="Precio máx">
+  <select id="f-sort">
+    <option value="name">Orden: nombre</option>
+    <option value="sell">Orden: precio</option>
+    <option value="changePct">Orden: cambio</option>
+  </select>
+  <button id="f-desc" title="Invertir orden">⇅</button>
+  <button id="f-clear">Limpiar</button>
+</div>
+<div class="bar">
+  <select id="saved"><option value="">Filtros guardados…</option></select>
+  <button id="save">Guardar filtro actual</button>
+  <button id="del">Borrar</button>
+</div>
+<div id="count"></div>
+<div class="grid" id="grid"></div>
+
+<div id="modal"><div class="panel">
+  <div class="ph"><img id="m-ico" class="ico" alt=""><h2 id="m-name"></h2><button id="m-close">✕</button></div>
+  <div class="rangos" id="rangos">
+    <button data-h="24">24 h</button><button data-h="72">3 días</button><button data-h="168" class="on">7 días</button>
+  </div>
+  <div id="hmsg"></div>
+  <div class="chartbox"><canvas id="chart"></canvas></div>
+  <div id="stats"></div>
+</div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getDatabase, ref, onValue, get, query, orderByKey, startAt } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDxQFnaTxPGvnyAH3YKeHvUIP24I2e422o",
+  authDomain: "bayas-88ec5.firebaseapp.com",
+  databaseURL: "https://bayas-88ec5-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "bayas-88ec5",
+  appId: "1:484097821045:web:4682957645816860472b3c"
+};
+const UMBRAL = 8.0, STALE_MS = 90000, BUCKET = 300, KEEP = 2016, FLASH_MS = 2000;
+const DEFAULT_WATCH = ["Caoca","Pasio","Gualot","Tamar","Rimoya","Pomaro","Kebia","Acardo","Coba","Payapa",
+                       "Yecana","Charti","Drasi","Anjiro","Dillo","Bariba","Chilan","Roseli"];
+const db = getDatabase(initializeApp(firebaseConfig));
+const $ = id => document.getElementById(id);
+const fold = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const store = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+
+let items = {}, meta = null, sortDesc = false, watchOn = false, watch = null, itemsSig = "";
+let prevSell = null;                 // id -> precio (x100) de la actualización anterior
+const flashes = {};                  // id -> { dir, start }
+
+/* ---------- datos en vivo ---------- */
+onValue(ref(db, "bayas"), snap => {
+  const v = snap.val() || {};
+  items = v.items || {}; meta = v.meta || null;
+  detectChanges();
+  if (!watch) initWatch();
+  render(); estado();
+  const sig = Object.keys(items).sort().join(",");
+  if (sig !== itemsSig) { itemsSig = sig; renderMgr(); }
+  updateMgrSummary();
+}, err => { $("estado").className = "err"; $("estado").textContent = "Error: " + err.message; });
+
+function detectChanges() {
+  const now = Date.now(), cur = {};
+  for (const [id, v] of Object.entries(items)) {
+    cur[id] = Math.round(v.sell * 100);
+    if (prevSell && id in prevSell && prevSell[id] !== cur[id])
+      flashes[id] = { dir: cur[id] > prevSell[id] ? "f-up" : "f-down", start: now };
+  }
+  prevSell = cur;
+}
+function flashClass(id) {
+  const f = flashes[id]; if (!f) return "";
+  const el = Date.now() - f.start;
+  if (el >= FLASH_MS) { delete flashes[id]; return ""; }
+  return ` ${f.dir}" style="animation-delay:-${el}ms`;
+}
+
+function estado() {
+  const e = $("estado");
+  if (!meta) { e.className = ""; e.textContent = "Esperando datos…"; return; }
+  const hora = new Date(meta.updatedAt).toLocaleTimeString("es-ES");
+  if (meta.status === "sin_datos") { e.className = "warn"; e.textContent = "Sin bayas detectadas (última señal " + hora + "). Se muestran los últimos precios."; }
+  else if (Date.now() - meta.updatedAt > STALE_MS) { e.className = "warn"; e.textContent = "Datos antiguos: última actualización " + hora; }
+  else { e.className = "ok"; e.textContent = "Actualizado " + hora; }
+}
+setInterval(estado, 5000);
+
+/* ---------- monitorizadas ---------- */
+const groupOf = n => { const f = fold(n); return f.startsWith("baya") ? "Bayas" : f.startsWith("menta") ? "Mentas" : f.startsWith("bonguri") ? "Bonguris" : "Otros"; };
+const lastWord = n => fold(n).split(/\s+/).pop();
+
+function defaultWatch() {
+  const names = new Set(DEFAULT_WATCH.map(fold));
+  return Object.entries(items).filter(([, v]) => groupOf(v.name) === "Bayas" && names.has(lastWord(v.name))).map(([id]) => id);
+}
+function initWatch() {
+  const saved = load("berryWatch", null);
+  if (saved) { watch = new Set(saved); return; }
+  if (!Object.keys(items).length) return;
+  watch = new Set(defaultWatch()); store("berryWatch", [...watch]);
+}
+const saveWatch = () => { store("berryWatch", [...watch]); updateMgrSummary(); render(); };
+function updateMgrSummary() { $("mgr-sum").textContent = "Gestionar monitorizadas (" + (watch ? watch.size : 0) + ")"; }
+
+function renderMgr() {
+  if (!watch) return;
+  const q = fold($("m-search").value);
+  const groups = { Bayas: [], Mentas: [], Bonguris: [], Otros: [] };
+  Object.entries(items).forEach(([id, v]) => { if (!q || fold(v.name).includes(q)) groups[groupOf(v.name)].push([id, v.name]); });
+  $("m-list").innerHTML = Object.entries(groups).filter(([, l]) => l.length).map(([g, l]) => {
+    l.sort((a, b) => a[1].localeCompare(b[1], "es"));
+    const marcadas = l.filter(([id]) => watch.has(id)).length;
+    return `<div class="grp">${g} <small>${marcadas}/${l.length}</small>
+        <button data-g="${g}" data-a="all">Todas</button><button data-g="${g}" data-a="none">Ninguna</button></div>
+      <div class="lst">` + l.map(([id, n]) => `<label><input type="checkbox" data-id="${id}" ${watch.has(id) ? "checked" : ""}>${n}</label>`).join("") + `</div>`;
+  }).join("") || '<div style="color:var(--mut)">Sin resultados</div>';
+}
+function visibleIds() { return [...$("m-list").querySelectorAll("input[data-id]")].map(i => i.dataset.id); }
+$("m-list").addEventListener("change", e => {
+  const id = e.target.dataset.id; if (!id) return;
+  e.target.checked ? watch.add(id) : watch.delete(id); saveWatch(); renderMgr();
+});
+$("m-list").addEventListener("click", e => {
+  const b = e.target.closest("button[data-g]"); if (!b) return;
+  const ids = [...$("m-list").querySelectorAll(".grp")].find(x => x.contains(b)).nextElementSibling
+              .querySelectorAll("input[data-id]");
+  ids.forEach(i => b.dataset.a === "all" ? watch.add(i.dataset.id) : watch.delete(i.dataset.id));
+  saveWatch(); renderMgr();
+});
+$("m-search").addEventListener("input", renderMgr);
+$("m-all").onclick = () => { visibleIds().forEach(i => watch.add(i)); saveWatch(); renderMgr(); };
+$("m-none").onclick = () => { visibleIds().forEach(i => watch.delete(i)); saveWatch(); renderMgr(); };
+$("m-reset").onclick = () => { if (confirm("¿Volver a la lista inicial de 18 bayas?")) { watch = new Set(defaultWatch()); saveWatch(); renderMgr(); } };
+document.addEventListener("click", e => { const d = $("mgr"); if (d.open && !d.contains(e.target)) d.open = false; });
+
+$("f-watch").onclick = () => { watchOn = !watchOn; syncWatchBtn(); render(); };
+function syncWatchBtn() { $("f-watch").classList.toggle("on", watchOn); }
+
+/* ---------- filtros ---------- */
+function getFilter() {
+  return { text:$("f-text").value, dir:$("f-dir").value, min:$("f-min").value, max:$("f-max").value,
+           sort:$("f-sort").value, desc:sortDesc, watch:watchOn };
+}
+function setFilter(f) {
+  $("f-text").value = f.text ?? ""; $("f-dir").value = f.dir ?? "all";
+  $("f-min").value = f.min ?? ""; $("f-max").value = f.max ?? "";
+  $("f-sort").value = f.sort ?? "name"; sortDesc = !!f.desc; watchOn = !!f.watch;
+  syncWatchBtn(); render();
+}
+function refreshSaved(sel) {
+  const s = load("berryFilters", {});
+  $("saved").innerHTML = '<option value="">Filtros guardados…</option>' +
+    Object.keys(s).sort().map(n => `<option>${n.replace(/</g,"&lt;")}</option>`).join("");
+  if (sel) $("saved").value = sel;
+}
+$("save").onclick = () => {
+  const n = (prompt("Nombre del filtro:") || "").trim(); if (!n) return;
+  const s = load("berryFilters", {}); s[n] = getFilter(); store("berryFilters", s); refreshSaved(n);
+};
+$("del").onclick = () => {
+  const n = $("saved").value; if (!n || !confirm("¿Borrar el filtro «" + n + "»?")) return;
+  const s = load("berryFilters", {}); delete s[n]; store("berryFilters", s); refreshSaved();
+};
+$("saved").onchange = () => { const f = load("berryFilters", {})[$("saved").value]; if (f) setFilter(f); };
+$("f-clear").onclick = () => { $("saved").value = ""; setFilter({}); };
+$("f-desc").onclick = () => { sortDesc = !sortDesc; render(); };
+["f-text","f-dir","f-min","f-max","f-sort"].forEach(id => $(id).addEventListener("input", render));
+
+/* ---------- tarjetas ---------- */
+function render() {
+  const f = getFilter(), q = fold(f.text);
+  const min = f.min === "" ? -Infinity : +f.min, max = f.max === "" ? Infinity : +f.max;
+  let rows = Object.entries(items).map(([id, v]) => ({ id, ...v })).filter(r =>
+    (!f.watch || !watch || watch.has(r.id)) &&
+    (!q || fold(r.name).includes(q) || fold(r.itemId).includes(q)) &&
+    r.sell >= min && r.sell <= max &&
+    (f.dir === "all" || (f.dir === "up" ? r.changePct > 0 : r.changePct < 0)));
+  const k = f.sort;
+  rows.sort((a, b) => {
+    const x = a[k] ?? -Infinity, y = b[k] ?? -Infinity;
+    return (typeof x === "string" ? x.localeCompare(y, "es") : x - y) * (sortDesc ? -1 : 1);
+  });
+  $("count").textContent = rows.length + " de " + Object.keys(items).length + " items";
+  $("grid").innerHTML = rows.map(r => {
+    const pct = r.changePct == null ? "–" : (r.changePct > 0 ? "+" : "") + r.changePct.toFixed(1) + "%";
+    const cls = r.changePct > 0 ? "sube" : r.changePct < 0 ? "baja" : "";
+    return `<div class="card ${r.sell >= UMBRAL ? "alta" : ""}${flashClass(r.id)}" data-id="${r.id}">
+      <img class="ico" src="img/${r.id}.png" alt="" loading="lazy" onerror="this.classList.add('vacio');this.removeAttribute('src')">
+      <div class="nombre">${r.name}</div>
+      <div class="precio">${r.sell.toFixed(2)}</div>
+      <div class="cambio ${cls}">${pct}</div>
+    </div>`;
+  }).join("");
+}
+$("grid").onclick = e => { const c = e.target.closest(".card"); if (c) openChart(c.dataset.id); };
+
+/* ---------- historial ---------- */
+let chart = null, series = [], current = null, hours = 168;
+const hist = {};
+const fmt = ts => new Date(ts).toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+
+async function openChart(id) {
+  current = id; const it = items[id];
+  $("m-name").textContent = it.name;
+  const img = $("m-ico"); img.src = "img/" + id + ".png"; img.onerror = () => img.removeAttribute("src");
+  $("modal").classList.add("on"); $("hmsg").textContent = "Cargando historial…";
+  if (!hist[id] || Date.now() - hist[id].t > 60000) {
+    const from = Math.floor(Date.now() / 1000 / BUCKET) - KEEP;
+    const snap = await get(query(ref(db, "historial/" + id), orderByKey(), startAt(String(from))));
+    const v = snap.val() || {};
+    hist[id] = { t: Date.now(), pts: Object.entries(v).map(([b, p]) => ({ x: +b * BUCKET * 1000, y: p })).sort((a, b) => a.x - b.x) };
+  }
+  if (current !== id) return;
+  series = hist[id].pts; draw();
+}
+
+function draw() {
+  const cut = Date.now() - hours * 3600000;
+  const pts = series.filter(p => p.x >= cut);
+  $("hmsg").textContent = pts.length ? "" : "Aún no hay historial para esta baya.";
+  const ys = pts.map(p => p.y);
+  $("stats").innerHTML = pts.length ? [
+    "Actual: " + ys[ys.length - 1].toFixed(2), "Mín: " + Math.min(...ys).toFixed(2),
+    "Máx: " + Math.max(...ys).toFixed(2), "Media: " + (ys.reduce((a, b) => a + b, 0) / ys.length).toFixed(2),
+    pts.length + " puntos"].map(s => `<span>${s}</span>`).join("") : "";
+  if (chart) chart.destroy();
+  chart = new Chart($("chart"), {
+    type: "line",
+    data: { datasets: [{ data: pts, borderColor: "#6aa8ff", backgroundColor: "#6aa8ff22", fill: true,
+                         pointRadius: 0, pointHoverRadius: 4, borderWidth: 2, tension: 0.15 }] },
+    options: { parsing: false, animation: false, maintainAspectRatio: false, normalized: true,
+      interaction: { mode: "nearest", axis: "x", intersect: false },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { title: c => fmt(c[0].parsed.x), label: c => c.parsed.y.toFixed(2) } } },
+      scales: { x: { type: "linear", ticks: { maxTicksLimit: 7, callback: v => fmt(v) }, grid: { color: "#2a2f3c" } },
+                y: { grid: { color: "#2a2f3c" } } } }
+  });
+}
+$("rangos").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  hours = +b.dataset.h;
+  [...$("rangos").children].forEach(x => x.classList.toggle("on", x === b));
+  if (current) draw();
+};
+const close = () => { $("modal").classList.remove("on"); current = null; };
+$("m-close").onclick = close;
+$("modal").onclick = e => { if (e.target.id === "modal") close(); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
+
+refreshSaved();
+setFilter(load("berryLast", {}));
+window.addEventListener("beforeunload", () => store("berryLast", getFilter()));
+</script>
+</body>
+</html>
