@@ -44,9 +44,10 @@
   .toast b { color:var(--ok); }
   details.mgr { position:relative; }
   details.mgr summary { list-style:none; } details.mgr summary::-webkit-details-marker { display:none; }
-  .mgrpanel { position:absolute; top:calc(100% + 6px); left:0; z-index:4; width:min(560px,92vw); max-height:65vh; overflow:auto;
+  .mgrpanel { position:absolute; top:calc(100% + 6px); left:0; z-index:4; width:min(600px,92vw); max-height:65vh; overflow:auto;
               background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; box-shadow:0 10px 30px #000a; }
   .mgrtop { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; position:sticky; top:-12px; background:var(--card); padding:8px 0; z-index:1; }
+  .mgrtop button { font-size:.85rem; padding:5px 8px; }
   .grp { margin:10px 0 4px; font-weight:600; display:flex; align-items:center; gap:8px; }
   .grp small { color:var(--mut); font-weight:400; }
   .grp button { padding:2px 8px; font-size:.8rem; }
@@ -69,15 +70,17 @@
 <div id="toasts"></div>
 
 <div class="bar">
-  <button id="f-watch" title="Mostrar solo las que tengo monitorizadas">★ Monitorizadas</button>
+  <button id="f-watch" title="Alternar entre mostrar todas y solo mis monitorizadas">★ Monitorizadas</button>
   <details class="mgr" id="mgr">
-    <summary id="mgr-sum">Gestionar monitorizadas</summary>
+    <summary id="mgr-sum">Bayas a mostrar</summary>
     <div class="mgrpanel">
       <div class="mgrtop">
         <input id="m-search" type="search" placeholder="Buscar en la lista…">
-        <button id="m-reset" title="Volver a la lista inicial">Restaurar inicial</button>
+        <button id="m-showall" title="Mostrar todas las bayas">Mostrar todas</button>
         <button id="m-all">Marcar visibles</button>
         <button id="m-none">Quitar visibles</button>
+        <button id="m-savewatch" title="Usar la selección actual como mi lista de monitorizadas (botón ★)">Guardar como ★ monitorizadas</button>
+        <button id="m-reset" title="Volver a la lista inicial de ★">Restaurar ★ inicial</button>
       </div>
       <div id="m-list"></div>
     </div>
@@ -147,7 +150,10 @@ const fold = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toL
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const store = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-let items = {}, meta = null, sortDesc = true, watchOn = false, watch = null, itemsSig = "";
+let items = {}, meta = null, sortDesc = true, itemsSig = "";
+let sel = null;                      // null = todas; Set de ids = solo esas se muestran
+let watch = load("berryWatch", null); watch = watch ? new Set(watch) : null;   // lista ★
+let pendingWatch = false;
 let prevRaw = null;                  // id -> precio exacto de la actualización anterior
 let lastUpdated = null;              // meta.updatedAt de la última actualización procesada
 const flashes = {};                  // id -> { dir, start }
@@ -156,12 +162,12 @@ const flashes = {};                  // id -> { dir, start }
 onValue(ref(db, "bayas"), snap => {
   const v = snap.val() || {};
   items = v.items || {}; meta = v.meta || null;
-  if (!watch) initWatch();
+  initWatch();
   detectChanges();
   render(); estado();
   const sig = Object.keys(items).sort().join(",");
   if (sig !== itemsSig) { itemsSig = sig; renderMgr(); }
-  updateMgrSummary();
+  updateMgrSummary(); syncBtns();
 }, err => { $("estado").className = "err"; $("estado").textContent = "Error: " + err.message; });
 
 function detectChanges() {
@@ -215,7 +221,6 @@ function toast(a, x) {
   $("toasts").appendChild(t); setTimeout(() => t.remove(), 10000);
 }
 
-/* notificaciones del sistema (Windows, macOS, Linux) */
 function permText() {
   if (!("Notification" in window)) return "Este navegador no admite notificaciones";
   if (Notification.permission === "denied") return "Notificaciones bloqueadas: actívalas en el candado de la barra de direcciones";
@@ -254,7 +259,7 @@ $("n-test").onclick = async () => {
 $("n-on").addEventListener("change", () => {
   syncBtns();
   if ($("n-on").checked) {
-    if ($("n-snd").checked) beep();                   // desbloquea el audio con este clic
+    if ($("n-snd").checked) beep();
     if ($("n-os").checked) ensurePerm();
   }
 });
@@ -275,57 +280,76 @@ function estado() {
 }
 setInterval(estado, 5000);
 
-/* ---------- monitorizadas ---------- */
+/* ---------- selección de bayas a mostrar ---------- */
 const groupOf = n => { const f = fold(n); return f.startsWith("baya") ? "Bayas" : f.startsWith("menta") ? "Mentas" : f.startsWith("bonguri") ? "Bonguris" : "Otros"; };
 const lastWord = n => fold(n).split(/\s+/).pop();
+const allIds = () => Object.keys(items);
 
 function defaultWatch() {
   const names = new Set(DEFAULT_WATCH.map(fold));
   return Object.entries(items).filter(([, v]) => groupOf(v.name) === "Bayas" && names.has(lastWord(v.name))).map(([id]) => id);
 }
 function initWatch() {
-  const saved = load("berryWatch", null);
-  if (saved) { watch = new Set(saved); return; }
-  if (!Object.keys(items).length) return;
-  watch = new Set(defaultWatch()); store("berryWatch", [...watch]);
+  if (!watch && Object.keys(items).length) { watch = new Set(defaultWatch()); store("berryWatch", [...watch]); }
+  if (pendingWatch && watch) { sel = new Set(watch); pendingWatch = false; }
 }
-const saveWatch = () => { store("berryWatch", [...watch]); updateMgrSummary(); render(); };
-function updateMgrSummary() { $("mgr-sum").textContent = "Gestionar monitorizadas (" + (watch ? watch.size : 0) + ")"; }
+function sameSet(a, b) { return a && b && a.size === b.size && [...a].every(x => b.has(x)); }
+function selIsWatch() { return !!sel && !!watch && sameSet(sel, watch); }
+
+function ensureSel() { if (!sel) sel = new Set(allIds()); return sel; }
+function normalizeSel() { if (sel && allIds().length && allIds().every(id => sel.has(id))) sel = null; }
+function selChanged() { normalizeSel(); store("berryLast", getFilter()); updateMgrSummary(); syncBtns(); render(); }
+
+function updateMgrSummary() {
+  const total = allIds().length, shown = sel ? allIds().filter(id => sel.has(id)).length : total;
+  $("mgr-sum").textContent = `Bayas a mostrar (${shown}/${total})`;
+}
 
 function renderMgr() {
-  if (!watch) return;
   const q = fold($("m-search").value);
   const groups = { Bayas: [], Mentas: [], Bonguris: [], Otros: [] };
   Object.entries(items).forEach(([id, v]) => { if (!q || fold(v.name).includes(q)) groups[groupOf(v.name)].push([id, v.name]); });
   $("m-list").innerHTML = Object.entries(groups).filter(([, l]) => l.length).map(([g, l]) => {
     l.sort((a, b) => a[1].localeCompare(b[1], "es"));
-    const marcadas = l.filter(([id]) => watch.has(id)).length;
+    const marcadas = l.filter(([id]) => !sel || sel.has(id)).length;
     return `<div class="grp">${g} <small>${marcadas}/${l.length}</small>
         <button data-g="${g}" data-a="all">Todas</button><button data-g="${g}" data-a="none">Ninguna</button></div>
-      <div class="lst">` + l.map(([id, n]) => `<label><input type="checkbox" data-id="${id}" ${watch.has(id) ? "checked" : ""}>${n}</label>`).join("") + `</div>`;
+      <div class="lst">` + l.map(([id, n]) => `<label><input type="checkbox" data-id="${id}" ${!sel || sel.has(id) ? "checked" : ""}>${n}</label>`).join("") + `</div>`;
   }).join("") || '<div style="color:var(--mut)">Sin resultados</div>';
 }
 function visibleIds() { return [...$("m-list").querySelectorAll("input[data-id]")].map(i => i.dataset.id); }
 $("m-list").addEventListener("change", e => {
   const id = e.target.dataset.id; if (!id) return;
-  e.target.checked ? watch.add(id) : watch.delete(id); saveWatch(); renderMgr();
+  const s = ensureSel(); e.target.checked ? s.add(id) : s.delete(id); selChanged(); renderMgr();
 });
 $("m-list").addEventListener("click", e => {
   const b = e.target.closest("button[data-g]"); if (!b) return;
-  const ids = [...$("m-list").querySelectorAll(".grp")].find(x => x.contains(b)).nextElementSibling
-              .querySelectorAll("input[data-id]");
-  ids.forEach(i => b.dataset.a === "all" ? watch.add(i.dataset.id) : watch.delete(i.dataset.id));
-  saveWatch(); renderMgr();
+  const ids = [...[...$("m-list").querySelectorAll(".grp")].find(x => x.contains(b)).nextElementSibling
+              .querySelectorAll("input[data-id]")].map(i => i.dataset.id);
+  const s = ensureSel(); ids.forEach(id => b.dataset.a === "all" ? s.add(id) : s.delete(id));
+  selChanged(); renderMgr();
 });
 $("m-search").addEventListener("input", renderMgr);
-$("m-all").onclick = () => { visibleIds().forEach(i => watch.add(i)); saveWatch(); renderMgr(); };
-$("m-none").onclick = () => { visibleIds().forEach(i => watch.delete(i)); saveWatch(); renderMgr(); };
-$("m-reset").onclick = () => { if (confirm("¿Volver a la lista inicial de 18 bayas?")) { watch = new Set(defaultWatch()); saveWatch(); renderMgr(); } };
+$("m-all").onclick = () => { const s = ensureSel(); visibleIds().forEach(i => s.add(i)); selChanged(); renderMgr(); };
+$("m-none").onclick = () => { const s = ensureSel(); visibleIds().forEach(i => s.delete(i)); selChanged(); renderMgr(); };
+$("m-showall").onclick = () => { sel = null; selChanged(); renderMgr(); };
+$("m-savewatch").onclick = () => {
+  if (!sel) { alert("Ahora se muestran todas. Desmarca las que no quieras y vuelve a pulsar."); return; }
+  watch = new Set(sel); store("berryWatch", [...watch]); syncBtns();
+};
+$("m-reset").onclick = () => {
+  if (!confirm("¿Volver a la lista inicial de 18 bayas para el botón ★?")) return;
+  watch = new Set(defaultWatch()); store("berryWatch", [...watch]); syncBtns();
+};
 document.addEventListener("click", e => { const d = $("mgr"); if (d.open && !d.contains(e.target)) d.open = false; });
 
-$("f-watch").onclick = () => { watchOn = !watchOn; syncBtns(); render(); };
+$("f-watch").onclick = () => {
+  if (!watch) return;
+  sel = selIsWatch() ? null : new Set(watch);
+  selChanged(); renderMgr();
+};
 function syncBtns() {
-  $("f-watch").classList.toggle("on", watchOn);
+  $("f-watch").classList.toggle("on", selIsWatch());
   $("f-desc").textContent = sortDesc ? "↓" : "↑";
   $("notif").classList.toggle("on", $("n-on").checked);
 }
@@ -333,25 +357,29 @@ function syncBtns() {
 /* ---------- filtros ---------- */
 function getFilter() {
   return { text:$("f-text").value, dir:$("f-dir").value, sort:$("f-sort").value, desc:sortDesc,
-           watch:watchOn, non:$("n-on").checked, nx:$("n-x").value, nm:$("n-mode").value };
+           sel: sel ? [...sel] : null,
+           non:$("n-on").checked, nx:$("n-x").value, nm:$("n-mode").value };
 }
 function setFilter(f) {
   $("f-text").value = f.text ?? ""; $("f-dir").value = f.dir ?? "all";
-  $("f-sort").value = f.sort ?? "sell"; sortDesc = f.desc ?? true; watchOn = !!f.watch;
+  $("f-sort").value = f.sort ?? "sell"; sortDesc = f.desc ?? true;
+  if (Array.isArray(f.sel)) { sel = new Set(f.sel); pendingWatch = false; }
+  else if (f.watch) { if (watch) { sel = new Set(watch); pendingWatch = false; } else { sel = null; pendingWatch = true; } }   // filtros antiguos
+  else { sel = null; pendingWatch = false; }
   $("n-on").checked = !!f.non; $("n-x").value = f.nx ?? 8; $("n-mode").value = f.nm ?? "each";
-  syncBtns(); render();
+  normalizeSel(); updateMgrSummary(); syncBtns(); render(); renderMgr();
 }
 function matches(r, f) {
   const q = fold(f.text);
-  return (!f.watch || !watch || watch.has(r.id)) &&
+  return (!sel || sel.has(r.id)) &&
     (!q || fold(r.name).includes(q) || fold(r.itemId).includes(q)) &&
     (f.dir === "all" || (f.dir === "up" ? r.changePct > 0 : r.changePct < 0));
 }
-function refreshSaved(sel) {
+function refreshSaved(sel2) {
   const s = load("berryFilters", {});
   $("saved").innerHTML = '<option value="">Filtros guardados…</option>' +
     Object.keys(s).sort().map(n => `<option>${n.replace(/</g,"&lt;")}</option>`).join("");
-  if (sel) $("saved").value = sel;
+  if (sel2) $("saved").value = sel2;
 }
 $("save").onclick = () => {
   const n = (prompt("Nombre del filtro:") || "").trim(); if (!n) return;
