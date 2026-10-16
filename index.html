@@ -13,9 +13,15 @@
   #estado.ok{color:var(--ok)} #estado.warn{color:var(--warn)} #estado.err{color:var(--bad)}
   .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
   input, select, button, summary { background:var(--card); color:inherit; border:1px solid var(--line); border-radius:8px; padding:7px 10px; font:inherit; }
-  input[type=number] { width:90px; } input[type=search] { min-width:170px; }
+  input[type=number] { width:80px; } input[type=search] { min-width:170px; }
+  input[type=checkbox] { width:auto; padding:0; }
   button, summary { cursor:pointer; } button:hover, summary:hover { border-color:var(--acc); }
   button.on { border-color:#e5b94a; color:#e5b94a; background:#2a2415; }
+  .notif { display:flex; align-items:center; gap:8px; padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--card); flex-wrap:wrap; }
+  .notif.on { border-color:var(--ok); }
+  .notif label { display:flex; align-items:center; gap:5px; cursor:pointer; font-size:.9rem; }
+  .notif input[type=number], .notif select, .notif button { padding:4px 6px; font-size:.9rem; }
+  #n-perm { font-size:.8rem; color:var(--warn); }
   #count { color:var(--mut); font-size:.85rem; margin:4px 0 10px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; text-align:center; cursor:pointer; transition:border-color .15s, transform .15s; }
@@ -32,6 +38,10 @@
                           100% { box-shadow:0 0 0 transparent; } }
   .card.f-up   { animation:flash-up 2s ease-out both; }
   .card.f-down { animation:flash-down 2s ease-out both; }
+  #toasts { position:fixed; top:14px; right:14px; display:flex; flex-direction:column; gap:8px; z-index:9; max-width:min(340px,90vw); }
+  .toast { display:flex; gap:10px; align-items:center; background:#17301f; border:1px solid var(--ok); border-radius:10px; padding:10px 12px; box-shadow:0 8px 24px #000a; cursor:pointer; }
+  .toast img { width:32px; height:32px; image-rendering:pixelated; }
+  .toast b { color:var(--ok); }
   details.mgr { position:relative; }
   details.mgr summary { list-style:none; } details.mgr summary::-webkit-details-marker { display:none; }
   .mgrpanel { position:absolute; top:calc(100% + 6px); left:0; z-index:4; width:min(560px,92vw); max-height:65vh; overflow:auto;
@@ -56,6 +66,7 @@
 <body>
 <h1>Precio de las bayas</h1>
 <div id="estado">Conectando…</div>
+<div id="toasts"></div>
 
 <div class="bar">
   <button id="f-watch" title="Mostrar solo las que tengo monitorizadas">★ Monitorizadas</button>
@@ -77,17 +88,27 @@
     <option value="up">Solo suben</option>
     <option value="down">Solo bajan</option>
   </select>
-  <input id="f-min" type="number" step="0.1" placeholder="Precio mín">
-  <input id="f-max" type="number" step="0.1" placeholder="Precio máx">
   <select id="f-sort">
     <option value="name">Orden: nombre</option>
     <option value="sell">Orden: precio</option>
     <option value="changePct">Orden: cambio</option>
   </select>
-  <button id="f-desc" title="Invertir orden">⇅</button>
+  <button id="f-desc" title="Invertir orden">↓</button>
   <button id="f-clear">Limpiar</button>
 </div>
 <div class="bar">
+  <div class="notif" id="notif" title="Avisa cuando alguna baya del filtro esté por encima de este precio">
+    <label><input id="n-on" type="checkbox"> 🔔 Avisar si supera</label>
+    <input id="n-x" type="number" step="0.1" value="8">
+    <select id="n-mode" title="Cuándo avisar">
+      <option value="each">En cada actualización</option>
+      <option value="cross">Solo al cruzar el precio</option>
+    </select>
+    <label title="Pitido"><input id="n-snd" type="checkbox" checked> 🔊 Sonido</label>
+    <label title="Notificación del sistema (Windows)"><input id="n-os" type="checkbox" checked> 🖥 Windows</label>
+    <button id="n-test" title="Enviar una notificación de prueba">Probar</button>
+    <span id="n-perm"></span>
+  </div>
   <select id="saved"><option value="">Filtros guardados…</option></select>
   <button id="save">Guardar filtro actual</button>
   <button id="del">Borrar</button>
@@ -126,16 +147,17 @@ const fold = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toL
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const store = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-let items = {}, meta = null, sortDesc = false, watchOn = false, watch = null, itemsSig = "";
-let prevSell = null;                 // id -> precio (x100) de la actualización anterior
+let items = {}, meta = null, sortDesc = true, watchOn = false, watch = null, itemsSig = "";
+let prevRaw = null;                  // id -> precio exacto de la actualización anterior
+let lastUpdated = null;              // meta.updatedAt de la última actualización procesada
 const flashes = {};                  // id -> { dir, start }
 
 /* ---------- datos en vivo ---------- */
 onValue(ref(db, "bayas"), snap => {
   const v = snap.val() || {};
   items = v.items || {}; meta = v.meta || null;
-  detectChanges();
   if (!watch) initWatch();
+  detectChanges();
   render(); estado();
   const sig = Object.keys(items).sort().join(",");
   if (sig !== itemsSig) { itemsSig = sig; renderMgr(); }
@@ -143,20 +165,105 @@ onValue(ref(db, "bayas"), snap => {
 }, err => { $("estado").className = "err"; $("estado").textContent = "Error: " + err.message; });
 
 function detectChanges() {
-  const now = Date.now(), cur = {};
+  const now = Date.now(), cur = {}, f = getFilter(), x = +f.nx;
+  const armed = f.non && f.nx !== "" && Number.isFinite(x);
+  const crossed = [], over = [];
   for (const [id, v] of Object.entries(items)) {
-    cur[id] = Math.round(v.sell * 100);
-    if (prevSell && id in prevSell && prevSell[id] !== cur[id])
-      flashes[id] = { dir: cur[id] > prevSell[id] ? "f-up" : "f-down", start: now };
+    cur[id] = v.sell;
+    const r = { id, ...v };
+    if (armed && v.sell > x && matches(r, f)) over.push({ id, name: v.name, sell: v.sell });
+    if (!prevRaw || !(id in prevRaw)) continue;
+    const a = Math.round(prevRaw[id] * 100), b = Math.round(v.sell * 100);
+    if (a !== b) flashes[id] = { dir: b > a ? "f-up" : "f-down", start: now };
+    if (armed && prevRaw[id] <= x && v.sell > x && matches(r, f)) crossed.push({ id, name: v.name, sell: v.sell });
   }
-  prevSell = cur;
+  const updated = meta && lastUpdated !== null && meta.updatedAt !== lastUpdated;
+  if (meta) lastUpdated = meta.updatedAt;
+  prevRaw = cur;
+  if (!armed) return;
+  crossed.forEach(a => toast(a, x));
+  const list = f.nm === "cross" ? crossed : (updated ? over : []);
+  if (!list.length) return;
+  if ($("n-snd").checked) beep();
+  if ($("n-os").checked) osNotify(list, x);
 }
+
 function flashClass(id) {
   const f = flashes[id]; if (!f) return "";
   const el = Date.now() - f.start;
   if (el >= FLASH_MS) { delete flashes[id]; return ""; }
   return ` ${f.dir}" style="animation-delay:-${el}ms`;
 }
+
+/* ---------- avisos ---------- */
+let audioCtx = null;
+function beep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine"; o.frequency.value = 880; g.gain.value = 0.15;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.frequency.setValueAtTime(1175, audioCtx.currentTime + 0.12); o.stop(audioCtx.currentTime + 0.3);
+  } catch {}
+}
+function toast(a, x) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.innerHTML = `<img src="img/${a.id}.png" alt="" onerror="this.remove()"><div><b>${a.name}</b><br>${a.sell.toFixed(2)} (> ${x.toFixed(2)})</div>`;
+  t.onclick = () => t.remove();
+  $("toasts").appendChild(t); setTimeout(() => t.remove(), 10000);
+}
+
+/* notificaciones del sistema (Windows, macOS, Linux) */
+function permText() {
+  if (!("Notification" in window)) return "Este navegador no admite notificaciones";
+  if (Notification.permission === "denied") return "Notificaciones bloqueadas: actívalas en el candado de la barra de direcciones";
+  if (Notification.permission === "default") return "Falta dar permiso (pulsa Probar)";
+  return "";
+}
+function updatePerm() { $("n-perm").textContent = $("n-os").checked ? permText() : ""; }
+async function ensurePerm() {
+  if ("Notification" in window && Notification.permission === "default") {
+    try { await Notification.requestPermission(); } catch {}
+  }
+  updatePerm();
+  return "Notification" in window && Notification.permission === "granted";
+}
+function sendNotif(title, body, icon) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return false;
+  try {
+    new Notification(title, { body, icon, tag: "bayas-umbral", renotify: true, silent: $("n-snd").checked });
+    return true;
+  } catch { return false; }
+}
+function osNotify(list, x) {
+  const l = [...list].sort((a, b) => b.sell - a.sell);
+  const title = l.length === 1 ? `${l[0].name} supera ${x.toFixed(2)}` : `${l.length} bayas superan ${x.toFixed(2)}`;
+  const lines = l.slice(0, 6).map(a => `${a.name.replace(/^Baya /, "")}: ${a.sell.toFixed(2)}`);
+  if (l.length > 6) lines.push(`…y ${l.length - 6} más`);
+  sendNotif(title, lines.join("\n"), `img/${l[0].id}.png`);
+}
+$("n-test").onclick = async () => {
+  const ok = await ensurePerm();
+  if (!ok) { updatePerm(); return; }
+  const top = Object.entries(items).map(([id, v]) => ({ id, ...v })).sort((a, b) => b.sell - a.sell)[0];
+  sendNotif("Prueba de notificación", top ? `${top.name.replace(/^Baya /, "")}: ${top.sell.toFixed(2)}` : "Las notificaciones funcionan",
+            top ? `img/${top.id}.png` : undefined);
+};
+$("n-on").addEventListener("change", () => {
+  syncBtns();
+  if ($("n-on").checked) {
+    if ($("n-snd").checked) beep();                   // desbloquea el audio con este clic
+    if ($("n-os").checked) ensurePerm();
+  }
+});
+$("n-snd").addEventListener("change", () => store("berrySound", $("n-snd").checked));
+$("n-os").addEventListener("change", () => { store("berryOs", $("n-os").checked); $("n-os").checked ? ensurePerm() : updatePerm(); });
+$("n-snd").checked = load("berrySound", true);
+$("n-os").checked = load("berryOs", true);
+updatePerm();
+document.addEventListener("click", () => { if ($("n-os").checked && $("n-on").checked) ensurePerm(); }, { once: true });
 
 function estado() {
   const e = $("estado");
@@ -216,19 +323,29 @@ $("m-none").onclick = () => { visibleIds().forEach(i => watch.delete(i)); saveWa
 $("m-reset").onclick = () => { if (confirm("¿Volver a la lista inicial de 18 bayas?")) { watch = new Set(defaultWatch()); saveWatch(); renderMgr(); } };
 document.addEventListener("click", e => { const d = $("mgr"); if (d.open && !d.contains(e.target)) d.open = false; });
 
-$("f-watch").onclick = () => { watchOn = !watchOn; syncWatchBtn(); render(); };
-function syncWatchBtn() { $("f-watch").classList.toggle("on", watchOn); }
+$("f-watch").onclick = () => { watchOn = !watchOn; syncBtns(); render(); };
+function syncBtns() {
+  $("f-watch").classList.toggle("on", watchOn);
+  $("f-desc").textContent = sortDesc ? "↓" : "↑";
+  $("notif").classList.toggle("on", $("n-on").checked);
+}
 
 /* ---------- filtros ---------- */
 function getFilter() {
-  return { text:$("f-text").value, dir:$("f-dir").value, min:$("f-min").value, max:$("f-max").value,
-           sort:$("f-sort").value, desc:sortDesc, watch:watchOn };
+  return { text:$("f-text").value, dir:$("f-dir").value, sort:$("f-sort").value, desc:sortDesc,
+           watch:watchOn, non:$("n-on").checked, nx:$("n-x").value, nm:$("n-mode").value };
 }
 function setFilter(f) {
   $("f-text").value = f.text ?? ""; $("f-dir").value = f.dir ?? "all";
-  $("f-min").value = f.min ?? ""; $("f-max").value = f.max ?? "";
-  $("f-sort").value = f.sort ?? "name"; sortDesc = !!f.desc; watchOn = !!f.watch;
-  syncWatchBtn(); render();
+  $("f-sort").value = f.sort ?? "sell"; sortDesc = f.desc ?? true; watchOn = !!f.watch;
+  $("n-on").checked = !!f.non; $("n-x").value = f.nx ?? 8; $("n-mode").value = f.nm ?? "each";
+  syncBtns(); render();
+}
+function matches(r, f) {
+  const q = fold(f.text);
+  return (!f.watch || !watch || watch.has(r.id)) &&
+    (!q || fold(r.name).includes(q) || fold(r.itemId).includes(q)) &&
+    (f.dir === "all" || (f.dir === "up" ? r.changePct > 0 : r.changePct < 0));
 }
 function refreshSaved(sel) {
   const s = load("berryFilters", {});
@@ -246,18 +363,13 @@ $("del").onclick = () => {
 };
 $("saved").onchange = () => { const f = load("berryFilters", {})[$("saved").value]; if (f) setFilter(f); };
 $("f-clear").onclick = () => { $("saved").value = ""; setFilter({}); };
-$("f-desc").onclick = () => { sortDesc = !sortDesc; render(); };
-["f-text","f-dir","f-min","f-max","f-sort"].forEach(id => $(id).addEventListener("input", render));
+$("f-desc").onclick = () => { sortDesc = !sortDesc; syncBtns(); render(); };
+["f-text","f-dir","f-sort"].forEach(id => $(id).addEventListener("input", render));
 
 /* ---------- tarjetas ---------- */
 function render() {
-  const f = getFilter(), q = fold(f.text);
-  const min = f.min === "" ? -Infinity : +f.min, max = f.max === "" ? Infinity : +f.max;
-  let rows = Object.entries(items).map(([id, v]) => ({ id, ...v })).filter(r =>
-    (!f.watch || !watch || watch.has(r.id)) &&
-    (!q || fold(r.name).includes(q) || fold(r.itemId).includes(q)) &&
-    r.sell >= min && r.sell <= max &&
-    (f.dir === "all" || (f.dir === "up" ? r.changePct > 0 : r.changePct < 0)));
+  const f = getFilter();
+  let rows = Object.entries(items).map(([id, v]) => ({ id, ...v })).filter(r => matches(r, f));
   const k = f.sort;
   rows.sort((a, b) => {
     const x = a[k] ?? -Infinity, y = b[k] ?? -Infinity;
@@ -333,6 +445,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
 refreshSaved();
 setFilter(load("berryLast", {}));
 window.addEventListener("beforeunload", () => store("berryLast", getFilter()));
+["n-on", "n-x", "n-mode"].forEach(id => $(id).addEventListener("input", () => store("berryLast", getFilter())));
 </script>
 </body>
 </html>
