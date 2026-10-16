@@ -53,15 +53,25 @@
   .grp button { padding:2px 8px; font-size:.8rem; }
   .lst { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:2px 10px; }
   .lst label { display:flex; gap:6px; align-items:center; font-size:.88rem; padding:2px 0; cursor:pointer; }
-  #modal { position:fixed; inset:0; background:#000a; display:none; align-items:center; justify-content:center; padding:14px; z-index:5; }
-  #modal.on { display:flex; }
+  .modal { position:fixed; inset:0; background:#000a; display:none; align-items:center; justify-content:center; padding:14px; z-index:5; }
+  .modal.on { display:flex; }
   .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; width:min(820px,100%); padding:16px; max-height:95vh; overflow:auto; }
+  .panel.big { width:min(1250px,100%); height:95vh; display:flex; flex-direction:column; }
   .ph { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
   .ph .ico { margin:0; width:40px; height:40px; } .ph h2 { margin:0; flex:1; font-size:1.2rem; }
-  .rangos { display:flex; gap:6px; margin-bottom:8px; } .rangos button.on { border-color:var(--acc); color:var(--acc); background:var(--card); }
+  .rangos { display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; align-items:center; } .rangos button.on { border-color:var(--acc); color:var(--acc); background:var(--card); }
   .chartbox { height:320px; position:relative; }
+  .panel.big .chartbox { height:42vh; min-height:240px; flex:none; }
   #stats { display:flex; gap:18px; flex-wrap:wrap; color:var(--mut); font-size:.85rem; margin-top:8px; }
-  #hmsg { color:var(--mut); font-size:.9rem; padding:8px 0; }
+  #hmsg, #s-msg { color:var(--mut); font-size:.9rem; padding:6px 0; }
+  .tablewrap { margin-top:10px; overflow:auto; flex:1; min-height:140px; border:1px solid var(--line); border-radius:10px; }
+  table { border-collapse:collapse; width:100%; font-size:.88rem; }
+  th, td { padding:6px 10px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { position:sticky; top:0; background:#222735; cursor:pointer; user-select:none; color:var(--mut); }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tbody tr { cursor:pointer; } tbody tr:hover { background:#222735; } tbody tr.off { opacity:.35; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; vertical-align:middle; }
+  td img { width:22px; height:22px; image-rendering:pixelated; vertical-align:middle; margin-right:6px; }
 </style>
 </head>
 <body>
@@ -98,6 +108,7 @@
   </select>
   <button id="f-desc" title="Invertir orden">↓</button>
   <button id="f-clear">Limpiar</button>
+  <button id="f-stats" title="Gráfica y tabla de todas las bayas del filtro actual">📊 Estadísticas</button>
 </div>
 <div class="bar">
   <div class="notif" id="notif" title="Avisa cuando alguna baya del filtro esté por encima de este precio">
@@ -119,7 +130,7 @@
 <div id="count"></div>
 <div class="grid" id="grid"></div>
 
-<div id="modal"><div class="panel">
+<div id="modal" class="modal"><div class="panel">
   <div class="ph"><img id="m-ico" class="ico" alt=""><h2 id="m-name"></h2><button id="m-close">✕</button></div>
   <div class="rangos" id="rangos">
     <button data-h="24">24 h</button><button data-h="72">3 días</button><button data-h="168" class="on">7 días</button>
@@ -127,6 +138,29 @@
   <div id="hmsg"></div>
   <div class="chartbox"><canvas id="chart"></canvas></div>
   <div id="stats"></div>
+</div></div>
+
+<div id="smodal" class="modal"><div class="panel big">
+  <div class="ph"><h2 id="s-title">Estadísticas</h2><button id="s-close">✕</button></div>
+  <div class="rangos">
+    <span style="color:var(--mut)">Periodo:</span>
+    <input id="s-n" type="number" min="1" max="168" value="24">
+    <select id="s-u"><option value="h">horas</option><option value="d">días</option></select>
+    <button data-p="6">6 h</button><button data-p="24">24 h</button><button data-p="72">3 d</button><button data-p="168">7 d</button>
+    <span style="color:var(--mut);font-size:.8rem">(máximo 7 días: es lo que se guarda)</span>
+  </div>
+  <div id="s-msg"></div>
+  <div class="chartbox"><canvas id="schart"></canvas></div>
+  <div class="tablewrap"><table>
+    <thead><tr>
+      <th data-k="name">Baya</th>
+      <th data-k="max" class="num">Máximo</th>
+      <th data-k="maxAt">Cuándo</th>
+      <th data-k="min" class="num">Mínimo</th>
+      <th data-k="last" class="num">Actual</th>
+    </tr></thead>
+    <tbody id="s-body"></tbody>
+  </table></div>
 </div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -141,7 +175,7 @@ const firebaseConfig = {
   projectId: "bayas-88ec5",
   appId: "1:484097821045:web:4682957645816860472b3c"
 };
-const UMBRAL = 8.0, STALE_MS = 90000, BUCKET = 300, KEEP = 2016, FLASH_MS = 2000;
+const UMBRAL = 8.0, STALE_MS = 90000, BUCKET = 300, KEEP = 2016, FLASH_MS = 2000, CACHE_MS = 60000;
 const DEFAULT_WATCH = ["Caoca","Pasio","Gualot","Tamar","Rimoya","Pomaro","Kebia","Acardo","Coba","Payapa",
                        "Yecana","Charti","Drasi","Anjiro","Dillo","Bariba","Chilan","Roseli"];
 const db = getDatabase(initializeApp(firebaseConfig));
@@ -149,14 +183,15 @@ const $ = id => document.getElementById(id);
 const fold = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const store = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+const fmt = ts => new Date(ts).toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
 
 let items = {}, meta = null, sortDesc = true, itemsSig = "";
 let sel = null;                      // null = todas; Set de ids = solo esas se muestran
 let watch = load("berryWatch", null); watch = watch ? new Set(watch) : null;   // lista ★
 let pendingWatch = false;
-let prevRaw = null;                  // id -> precio exacto de la actualización anterior
-let lastUpdated = null;              // meta.updatedAt de la última actualización procesada
-const flashes = {};                  // id -> { dir, start }
+let prevRaw = null;
+let lastUpdated = null;
+const flashes = {};
 
 /* ---------- datos en vivo ---------- */
 onValue(ref(db, "bayas"), snap => {
@@ -220,7 +255,6 @@ function toast(a, x) {
   t.onclick = () => t.remove();
   $("toasts").appendChild(t); setTimeout(() => t.remove(), 10000);
 }
-
 function permText() {
   if (!("Notification" in window)) return "Este navegador no admite notificaciones";
   if (Notification.permission === "denied") return "Notificaciones bloqueadas: actívalas en el candado de la barra de direcciones";
@@ -295,7 +329,6 @@ function initWatch() {
 }
 function sameSet(a, b) { return a && b && a.size === b.size && [...a].every(x => b.has(x)); }
 function selIsWatch() { return !!sel && !!watch && sameSet(sel, watch); }
-
 function ensureSel() { if (!sel) sel = new Set(allIds()); return sel; }
 function normalizeSel() { if (sel && allIds().length && allIds().every(id => sel.has(id))) sel = null; }
 function selChanged() { normalizeSel(); store("berryLast", getFilter()); updateMgrSummary(); syncBtns(); render(); }
@@ -304,7 +337,6 @@ function updateMgrSummary() {
   const total = allIds().length, shown = sel ? allIds().filter(id => sel.has(id)).length : total;
   $("mgr-sum").textContent = `Bayas a mostrar (${shown}/${total})`;
 }
-
 function renderMgr() {
   const q = fold($("m-search").value);
   const groups = { Bayas: [], Mentas: [], Bonguris: [], Otros: [] };
@@ -364,7 +396,7 @@ function setFilter(f) {
   $("f-text").value = f.text ?? ""; $("f-dir").value = f.dir ?? "all";
   $("f-sort").value = f.sort ?? "sell"; sortDesc = f.desc ?? true;
   if (Array.isArray(f.sel)) { sel = new Set(f.sel); pendingWatch = false; }
-  else if (f.watch) { if (watch) { sel = new Set(watch); pendingWatch = false; } else { sel = null; pendingWatch = true; } }   // filtros antiguos
+  else if (f.watch) { if (watch) { sel = new Set(watch); pendingWatch = false; } else { sel = null; pendingWatch = true; } }
   else { sel = null; pendingWatch = false; }
   $("n-on").checked = !!f.non; $("n-x").value = f.nx ?? 8; $("n-mode").value = f.nm ?? "each";
   normalizeSel(); updateMgrSummary(); syncBtns(); render(); renderMgr();
@@ -395,9 +427,13 @@ $("f-desc").onclick = () => { sortDesc = !sortDesc; syncBtns(); render(); };
 ["f-text","f-dir","f-sort"].forEach(id => $(id).addEventListener("input", render));
 
 /* ---------- tarjetas ---------- */
+function filteredRows() {
+  const f = getFilter();
+  return Object.entries(items).map(([id, v]) => ({ id, ...v })).filter(r => matches(r, f));
+}
 function render() {
   const f = getFilter();
-  let rows = Object.entries(items).map(([id, v]) => ({ id, ...v })).filter(r => matches(r, f));
+  let rows = filteredRows();
   const k = f.sort;
   rows.sort((a, b) => {
     const x = a[k] ?? -Infinity, y = b[k] ?? -Infinity;
@@ -417,26 +453,30 @@ function render() {
 }
 $("grid").onclick = e => { const c = e.target.closest(".card"); if (c) openChart(c.dataset.id); };
 
-/* ---------- historial ---------- */
-let chart = null, series = [], current = null, hours = 168;
-const hist = {};
-const fmt = ts => new Date(ts).toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+/* ---------- historial (compartido) ---------- */
+const hist = {};                      // id -> { from, t, pts }
+const bucketNow = () => Math.floor(Date.now() / 1000 / BUCKET);
+async function getHist(id, from) {
+  const c = hist[id];
+  if (c && c.from <= from && Date.now() - c.t < CACHE_MS) return c.pts;
+  const snap = await get(query(ref(db, "historial/" + id), orderByKey(), startAt(String(from))));
+  const v = snap.val() || {};
+  const pts = Object.entries(v).map(([b, p]) => ({ x: +b * BUCKET * 1000, y: p })).sort((a, b) => a.x - b.x);
+  hist[id] = { from, t: Date.now(), pts };
+  return pts;
+}
 
+/* ---------- gráfica de una baya ---------- */
+let chart = null, series = [], current = null, hours = 168;
 async function openChart(id) {
   current = id; const it = items[id];
   $("m-name").textContent = it.name;
   const img = $("m-ico"); img.src = "img/" + id + ".png"; img.onerror = () => img.removeAttribute("src");
   $("modal").classList.add("on"); $("hmsg").textContent = "Cargando historial…";
-  if (!hist[id] || Date.now() - hist[id].t > 60000) {
-    const from = Math.floor(Date.now() / 1000 / BUCKET) - KEEP;
-    const snap = await get(query(ref(db, "historial/" + id), orderByKey(), startAt(String(from))));
-    const v = snap.val() || {};
-    hist[id] = { t: Date.now(), pts: Object.entries(v).map(([b, p]) => ({ x: +b * BUCKET * 1000, y: p })).sort((a, b) => a.x - b.x) };
-  }
+  const pts = await getHist(id, bucketNow() - KEEP);
   if (current !== id) return;
-  series = hist[id].pts; draw();
+  series = pts; draw();
 }
-
 function draw() {
   const cut = Date.now() - hours * 3600000;
   const pts = series.filter(p => p.x >= cut);
@@ -468,7 +508,102 @@ $("rangos").onclick = e => {
 const close = () => { $("modal").classList.remove("on"); current = null; };
 $("m-close").onclick = close;
 $("modal").onclick = e => { if (e.target.id === "modal") close(); };
-document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
+
+/* ---------- estadísticas: todas las bayas del filtro ---------- */
+let schart = null, srows = [], sHours = 24, sSort = { k: "max", dir: -1 }, sRun = 0;
+const color = i => `hsl(${Math.round((i * 137.508) % 360)}, 70%, 60%)`;
+
+$("f-stats").onclick = () => {
+  srows = filteredRows().sort((a, b) => a.name.localeCompare(b.name, "es"));
+  srows.forEach((r, i) => { r.color = color(i); r.hidden = false; });
+  $("s-title").textContent = `Estadísticas · ${srows.length} bayas del filtro actual`;
+  $("smodal").classList.add("on");
+  setPeriod(sHours);
+};
+function setPeriod(h) {
+  sHours = Math.max(1, Math.min(168, Math.round(h)));
+  const d = sHours % 24 === 0 && sHours >= 24;
+  $("s-u").value = d ? "d" : "h"; $("s-n").value = d ? sHours / 24 : sHours;
+  document.querySelectorAll("#smodal .rangos button[data-p]").forEach(b => b.classList.toggle("on", +b.dataset.p === sHours));
+  loadStats();
+}
+function readPeriod() {
+  const n = +$("s-n").value; if (!(n > 0)) return;
+  setPeriod($("s-u").value === "d" ? n * 24 : n);
+}
+$("s-n").addEventListener("change", readPeriod);
+$("s-u").addEventListener("change", readPeriod);
+document.querySelectorAll("#smodal .rangos button[data-p]").forEach(b => b.onclick = () => setPeriod(+b.dataset.p));
+
+async function loadStats() {
+  const run = ++sRun, from = bucketNow() - Math.ceil(sHours * 3600 / BUCKET) - 1;
+  let done = 0;
+  $("s-msg").textContent = `Cargando historial 0/${srows.length}…`;
+  const queue = [...srows];
+  const worker = async () => {
+    while (queue.length && run === sRun) {
+      const r = queue.shift();
+      try { r.all = await getHist(r.id, from); } catch { r.all = []; }
+      $("s-msg").textContent = `Cargando historial ${++done}/${srows.length}…`;
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  if (run !== sRun) return;
+  const cut = Date.now() - sHours * 3600000;
+  srows.forEach(r => {
+    r.pts = (r.all || []).filter(p => p.x >= cut);
+    if (r.pts.length) {
+      let mx = r.pts[0], mn = r.pts[0];
+      r.pts.forEach(p => { if (p.y > mx.y) mx = p; if (p.y < mn.y) mn = p; });
+      r.max = mx.y; r.maxAt = mx.x; r.min = mn.y; r.last = r.pts[r.pts.length - 1].y;
+    } else { r.max = r.maxAt = r.min = r.last = null; }
+  });
+  $("s-msg").textContent = srows.some(r => r.pts.length) ? "" : "No hay historial en este periodo.";
+  drawStats(); drawTable();
+}
+function drawStats() {
+  if (schart) schart.destroy();
+  schart = new Chart($("schart"), {
+    type: "line",
+    data: { datasets: srows.map(r => ({ label: r.name, data: r.pts || [], borderColor: r.color, backgroundColor: r.color,
+                                        borderWidth: 1.6, pointRadius: 0, pointHoverRadius: 4, tension: 0.1, hidden: r.hidden })) },
+    options: { parsing: false, animation: false, maintainAspectRatio: false, normalized: true,
+      interaction: { mode: "nearest", axis: "x", intersect: false },
+      plugins: { legend: { display: false }, decimation: { enabled: true, algorithm: "min-max" },
+        tooltip: { callbacks: { title: c => fmt(c[0].parsed.x), label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(2)}` } } },
+      scales: { x: { type: "linear", ticks: { maxTicksLimit: 8, callback: v => fmt(v) }, grid: { color: "#2a2f3c" } },
+                y: { grid: { color: "#2a2f3c" } } } }
+  });
+}
+function drawTable() {
+  const { k, dir } = sSort;
+  const rows = [...srows].sort((a, b) => {
+    const x = a[k] ?? -Infinity, y = b[k] ?? -Infinity;
+    return (typeof x === "string" ? x.localeCompare(y, "es") : x - y) * dir;
+  });
+  const n = v => v == null ? "–" : v.toFixed(2);
+  $("s-body").innerHTML = rows.map(r => `<tr data-id="${r.id}" class="${r.hidden ? "off" : ""}" title="Clic para mostrar u ocultar en la gráfica">
+    <td><span class="dot" style="background:${r.color}"></span><img src="img/${r.id}.png" alt="" onerror="this.remove()">${r.name}</td>
+    <td class="num"><b>${n(r.max)}</b></td><td>${r.maxAt ? fmt(r.maxAt) : "–"}</td>
+    <td class="num">${n(r.min)}</td><td class="num">${n(r.last)}</td></tr>`).join("");
+}
+document.querySelectorAll("#smodal th").forEach(th => th.onclick = () => {
+  const k = th.dataset.k;
+  sSort = { k, dir: sSort.k === k ? -sSort.dir : (k === "name" ? 1 : -1) };
+  drawTable();
+});
+$("s-body").onclick = e => {
+  const tr = e.target.closest("tr"); if (!tr) return;
+  const i = srows.findIndex(r => r.id === tr.dataset.id); if (i < 0) return;
+  srows[i].hidden = !srows[i].hidden;
+  schart.setDatasetVisibility(i, !srows[i].hidden); schart.update();
+  tr.classList.toggle("off", srows[i].hidden);
+};
+const closeStats = () => { $("smodal").classList.remove("on"); sRun++; if (schart) { schart.destroy(); schart = null; } };
+$("s-close").onclick = closeStats;
+$("smodal").onclick = e => { if (e.target.id === "smodal") closeStats(); };
+
+document.addEventListener("keydown", e => { if (e.key === "Escape") { close(); closeStats(); } });
 
 refreshSaved();
 setFilter(load("berryLast", {}));
