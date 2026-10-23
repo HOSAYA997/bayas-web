@@ -610,5 +610,6 @@ setFilter(load("berryLast", {}));
 window.addEventListener("beforeunload", () => store("berryLast", getFilter()));
 ["n-on", "n-x", "n-mode"].forEach(id => $(id).addEventListener("input", () => store("berryLast", getFilter())));
 </script>
+<script type="module" src="gts.js"></script>
 </body>
 </html>
