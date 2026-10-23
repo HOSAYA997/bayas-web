@@ -271,7 +271,7 @@ function left(r) {
 const genderSym = g => g === "MALE" ? "♂" : g === "FEMALE" ? "♀" : g ? "–" : "";
 function nameCell(r) {
   return esc(r.name || r.species || r.itemId || "?") + (r.shiny ? '<span class="tag shiny">✨ shiny</span>' : "") +
-    (r.expired ? '<span class="tag bad">expirado</span>' : "") + (r.buyBlocked ? '<span class="tag bad">no comprable</span>' : "");
+    (r.expired ? '<span class="tag bad">expirado</span>' : "");
 }
 function detailCell(r) {
   const ivs = (r.ivs || []).map(v => v === 31 ? `<i class="m31">31</i>` : v === 0 ? `<i class="m0">0</i>` : `<i>${v}</i>`).join("/");
