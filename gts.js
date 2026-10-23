@@ -42,14 +42,11 @@ st.textContent = `
 .gwrap table{border-collapse:collapse;width:100%;font-size:.88rem}
 .gwrap th,.gwrap td{padding:6px 9px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
 .gwrap th{position:sticky;top:0;background:#222735;color:var(--mut);cursor:pointer;user-select:none;z-index:1}
-.gwrap th.detail{background:#4a3a7c;color:#e6dcff}
-.gwrap td.detail{background:#8e82bd;color:#fff;line-height:1.35;padding:5px 12px;min-width:150px;text-shadow:0 1px 0 #0003}
-.gwrap td.detail .ivs{color:#d5f5d0;font-variant-numeric:tabular-nums}
+.gwrap td.detail{line-height:1.35;min-width:150px}
+.gwrap td.detail .ivs{font-variant-numeric:tabular-nums}
 .gwrap td.detail .ivs i{font-style:normal}
-.gwrap td.detail .ivs .m31{color:#fff59a;font-weight:700}
-.gwrap td.detail .ivs .m0{color:#ffb4b4}
 .gwrap td.num,.gwrap th.num{text-align:right;font-variant-numeric:tabular-nums}
-.gwrap tbody tr.r{cursor:pointer} .gwrap tbody tr.r:hover td:not(.detail){background:#222735}
+.gwrap tbody tr.r{cursor:pointer} .gwrap tbody tr.r:hover td{background:#222735}
 .gwrap tr.det td{white-space:normal;background:#161a23;color:#cfd3df;font-size:.84rem;line-height:1.5}
 .tag{display:inline-block;padding:0 6px;border-radius:6px;font-size:.75rem;margin-left:4px;border:1px solid var(--line);color:var(--mut)}
 .tag.shiny{color:#ffd45a;border-color:#7a6320} .tag.bad{color:var(--bad);border-color:#6a2a2a}
