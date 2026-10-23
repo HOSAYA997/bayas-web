@@ -406,7 +406,7 @@ $("g-alist").onclick = e => {
 };
 function hitKey(r) { return r.id + "@" + r.price; }
 function evalRow(r, a) {
-  if (!a.on || r.buyBlocked || r.expired) return false;
+  if (!a.on || r.expired) return false;
   if (!match(r, a.filter, a.max)) return false;
   const set = (notified[a.id] ||= []);
   const k = hitKey(r); if (set.includes(k)) return false;
