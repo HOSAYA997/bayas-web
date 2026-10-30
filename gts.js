@@ -1,6 +1,8 @@
 import { getApps, getApp, initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getDatabase, ref, onValue, onChildAdded, onChildChanged, onChildRemoved } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+import { authReady } from "./auth.js";
 
+await authReady;
 const firebaseConfig = {
   apiKey: "AIzaSyDxQFnaTxPGvnyAH3YKeHvUIP24I2e422o",
   authDomain: "bayas-88ec5.firebaseapp.com",
