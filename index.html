@@ -167,7 +167,9 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getDatabase, ref, onValue, get, query, orderByKey, startAt } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+import { authReady } from "./auth.js"
 
+await authReady;
 const firebaseConfig = {
   apiKey: "AIzaSyDxQFnaTxPGvnyAH3YKeHvUIP24I2e422o",
   authDomain: "bayas-88ec5.firebaseapp.com",
